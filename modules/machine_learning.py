@@ -183,5 +183,309 @@ def calculate_feature_importance(ml_data, selected_target):
     importance_series = compute_importance(ml_data, selected_target)
     return importance_series
 
-# The rest of the code remains unchanged (run_model, run_optimization, etc.)
-# ...
+def run_model(ml_data, selected_features, selected_target, learning_rate, max_depth, n_estimators):
+    st.subheader("Model Training and Prediction")
+
+    # Prepare data
+    X = ml_data[selected_features]
+    y = ml_data[selected_target]
+
+    # Handle missing values
+    X = X.fillna(method='ffill').fillna(method='bfill')
+    y = y.fillna(method='ffill').fillna(method='bfill')
+
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
+
+    # Convert data to DMatrix format
+    dtrain = xgb.DMatrix(X_train, label=y_train)
+    dtest = xgb.DMatrix(X_test, label=y_test)
+
+    # Initialize progress bar
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    # Wastewater-themed progress steps
+    progress_steps = [
+        "Collecting samples from influent...",
+        "Cleaning the bar screens...",
+        "Skimming sludge blankets...",
+        "Topping off tanks...",
+        "Optimizing aeration rates...",
+        "Balancing flow between tanks...",
+        "Discharging treated water...",
+        "Clean predictions discharged downstream! 🎉"
+    ]
+    total_steps = len(progress_steps)
+
+    # Define parameters for XGBoost
+    params = {
+        'objective': 'reg:squarederror',
+        'learning_rate': learning_rate,
+        'max_depth': max_depth,
+    }
+
+    # Manually perform training rounds
+    model = None  # Initialize model
+    progress_step = 0
+    evals_result = {}
+
+    for i in range(n_estimators):
+        # Perform one boosting round
+        model = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=1,
+            xgb_model=model,
+            evals=[(dtest, 'eval')],
+            evals_result=evals_result,
+            verbose_eval=False
+        )
+        # Update progress bar and status text
+        progress = (i + 1) / n_estimators
+        progress_bar.progress(progress)
+        if progress >= (progress_step + 1) / (total_steps - 1) and progress_step < total_steps - 1:
+            status_text.text(progress_steps[progress_step])
+            progress_step += 1
+
+    # Final progress update
+    progress_bar.progress(1.0)
+    status_text.text(progress_steps[-1])
+    time.sleep(1)
+    # Clear progress bar
+    progress_bar.empty()
+    status_text.empty()
+
+    # Make predictions
+    y_pred = model.predict(dtest)
+
+    # Evaluate model
+    rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+    r2 = r2_score(y_test, y_pred)
+
+    # Trust Indicator Logic
+    if r2 > 0.85 and rmse < y_test.std():
+        trust_indicator = "🟢 High Confidence"
+    elif 0.6 < r2 <= 0.85:
+        trust_indicator = "🟡 Medium Confidence"
+    else:
+        trust_indicator = "🔴 Low Confidence"
+
+    # Display Results
+    st.subheader("Model Performance")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("RMSE", f"{rmse:.2f}", help="Root Mean Square Error: Lower values indicate better fit.")
+    with col2:
+        st.metric("R² Score", f"{r2:.2f}", help="R-squared: Proportion of variance explained by the model.")
+    with col3:
+        st.metric("Model Confidence", trust_indicator)
+
+    # Feature Importances
+    st.subheader("Feature Importances in the Model")
+    importance = model.get_score(importance_type='gain')
+    importance_df = pd.DataFrame({
+        'Feature': [f.replace('_', ' ').title() for f in selected_features],
+        'Importance': [importance.get(f, 0) for f in selected_features]
+    })
+    # Apply dynamic cutoff
+    max_importance = importance_df['Importance'].max()
+    importance_df = importance_df[importance_df['Importance'] >= 0.05 * max_importance]
+    importance_df = importance_df.sort_values(by='Importance', ascending=False)
+    fig = px.bar(importance_df, x='Importance', y='Feature', orientation='h')
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Predictions vs Actual
+    st.subheader("Predictions vs Actual")
+    pred_df = pd.DataFrame({
+        'Actual': y_test.reset_index(drop=True),
+        'Predicted': y_pred,
+        'Date': X_test.index
+    }).sort_values(by='Date')
+    fig = px.line(pred_df, x='Date', y=['Actual', 'Predicted'])
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Download Option
+    st.subheader("Download Results")
+    csv = pred_df.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Predictions as CSV",
+        data=csv,
+        file_name='predictions.csv',
+        mime='text/csv'
+    )
+
+def run_optimization(ml_data, configuration, selected_features, selected_target, learning_rate, max_depth, n_estimators, desired_target_value):
+    st.subheader("Parameter Optimization")
+
+    # Prepare data
+    X = ml_data[selected_features]
+    y = ml_data[selected_target]
+
+    # Handle missing values
+    X = X.fillna(method='ffill').fillna(method='bfill')
+    y = y.fillna(method='ffill').fillna(method='bfill')
+
+    # Convert data to DMatrix format
+    dtrain = xgb.DMatrix(X, label=y)
+
+    # Define parameters for XGBoost
+    params = {
+        'objective': 'reg:squarederror',
+        'learning_rate': learning_rate,
+        'max_depth': max_depth,
+    }
+
+    # Train the model on all data
+    model = xgb.train(
+        params,
+        dtrain,
+        num_boost_round=n_estimators,
+        verbose_eval=False
+    )
+
+    # Wastewater-themed progress steps for optimizer
+    progress_steps = [
+        "Collecting samples from influent...",
+        "Balancing chemical dosages...",
+        "Tuning aerators and blowers...",
+        "Checking clarifiers for sludge blankets...",
+        "Adjusting pump speeds to balance flow...",
+        "Monitoring effluent quality...",
+        "Discharging treated water downstream...",
+        "All systems go! Optimized parameters ready for use! 🎉"
+    ]
+    total_steps = len(progress_steps)
+
+    # Run optimization
+    st.info("Running optimization...")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    iteration = [0]  # Mutable object to keep track of iterations
+
+    # Get bounds and initial guess
+    bounds = bounds_factory(ml_data, configuration, selected_features)
+    initial_guess = initial_guess_factory(ml_data, selected_features)
+
+    # Define objective function
+    objective_function = objective_function_factory(model, selected_features, desired_target_value)
+
+    # Optimization options
+    max_iterations = 100
+    options = {'maxiter': max_iterations, 'disp': False}
+
+    # Define callback for optimizer progress
+    def optimizer_progress(xk):
+        iteration[0] += 1
+        progress = iteration[0] / max_iterations
+        step = int(progress * (total_steps - 1))
+        if step < total_steps:
+            status_text.text(progress_steps[step])
+        progress_bar.progress(min(progress, 1.0))
+
+    result = minimize(
+        objective_function,
+        x0=initial_guess,
+        bounds=bounds,
+        method='L-BFGS-B',
+        callback=optimizer_progress,
+        options=options
+    )
+
+    # Final progress update
+    progress_bar.progress(1.0)
+    status_text.text(progress_steps[-1])
+    time.sleep(1)
+    # Clear progress bar
+    progress_bar.empty()
+    status_text.empty()
+
+    if result.success:
+        st.success("Optimization converged successfully!")
+    else:
+        st.warning("Optimization did not converge.")
+
+    optimized_feature_values = result.x
+    optimized_features = {feature: value for feature, value in zip(selected_features, optimized_feature_values)}
+
+    # Display optimized parameters
+    st.subheader("Optimized Parameters")
+    optimized_df = pd.DataFrame({
+        'Feature': [f.replace('_', ' ').title() for f in selected_features],
+        'Optimized Value': optimized_feature_values
+    })
+    st.table(optimized_df)
+
+    # Predicted value with optimized parameters
+    feature_dict = {feature: [value] for feature, value in zip(selected_features, optimized_feature_values)}
+    input_df = pd.DataFrame(feature_dict)
+    dinput = xgb.DMatrix(input_df)
+    optimized_prediction = model.predict(dinput)[0]
+    st.subheader("Optimized Prediction")
+    st.write(f"Predicted {selected_target.replace('_', ' ').title()}: {optimized_prediction:.2f}")
+
+    # Trust Indicator Logic for Optimization
+    if result.success and iteration[0] < (0.8 * max_iterations):
+        trust_indicator = "🟢 High Confidence"
+    elif iteration[0] < max_iterations:
+        trust_indicator = "🟡 Medium Confidence"
+    else:
+        trust_indicator = "🔴 Low Confidence"
+
+    st.metric("Optimization Confidence", trust_indicator)
+
+    # Download Option for Optimization Results
+    st.subheader("Download Optimization Results")
+    optimization_results = pd.DataFrame({
+        'Feature': [f.replace('_', ' ').title() for f in selected_features],
+        'Optimized Value': optimized_feature_values
+    })
+    optimization_results['Desired Target'] = desired_target_value
+    optimization_results['Predicted Target'] = optimized_prediction
+
+    csv = optimization_results.to_csv(index=False).encode('utf-8')
+    st.download_button(
+        label="Download Optimization Results as CSV",
+        data=csv,
+        file_name='optimization_results.csv',
+        mime='text/csv'
+    )
+
+def objective_function_factory(model, selected_features, desired_target_value):
+    def objective_function(feature_values):
+        # Convert feature_values to DMatrix
+        feature_dict = {feature: [value] for feature, value in zip(selected_features, feature_values)}
+        input_df = pd.DataFrame(feature_dict)
+        dinput = xgb.DMatrix(input_df)
+
+        # Predict using the model
+        predicted = model.predict(dinput)[0]
+
+        # Objective is the squared difference between predicted and desired target value
+        return (predicted - desired_target_value) ** 2
+    return objective_function
+
+def initial_guess_factory(ml_data, selected_features):
+    # Initial guess: mean of the feature values
+    initial_guess = [ml_data[feature].mean() for feature in selected_features]
+    return initial_guess
+
+def bounds_factory(ml_data, configuration, selected_features):
+    # Clean configuration column names
+    configuration.columns = configuration.columns.str.strip().str.lower()
+    # Get bounds for features from configuration
+    config = configuration.set_index('feature_name')
+    bounds = []
+    for feature in selected_features:
+        feature_lower = feature.lower()
+        if feature_lower in config.index:
+            min_val = config.loc[feature_lower, 'min']
+            max_val = config.loc[feature_lower, 'max']
+            bounds.append((min_val, max_val))
+        else:
+            # If feature not in configuration, use data min and max
+            min_val = ml_data[feature].min()
+            max_val = ml_data[feature].max()
+            bounds.append((min_val, max_val))
+    return bounds
