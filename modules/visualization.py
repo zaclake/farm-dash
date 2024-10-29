@@ -296,24 +296,19 @@ def display_unit_process_scores(unit_process_scores, formatted_unit_process_name
 
 def display_unit_process_trends(scores_over_time, formatted_unit_process_names):
     st.header("Unit Process Performance Trends")
-    for process, scores in scores_over_time['unit_process_scores'].items():
-        process_name = formatted_unit_process_names.get(process, process)
-        if any(not np.isnan(s) for s in scores):
-            process_df = pd.DataFrame({
-                'Date': scores_over_time['dates'],
-                'Score': [
-                    s * 100 if not np.isnan(s) else None for s in scores
+    with st.expander("Show/Hide Unit Process Graphs"):
+        for process, scores in scores_over_time['unit_process_scores'].items():
+            process_name = formatted_unit_process_names.get(process, process)
+            if any(not np.isnan(s) for s in scores):
+                process_df = pd.DataFrame({
+                    'Date': scores_over_time['dates'],
+                    'Score': [s * 100 if not np.isnan(s) else None for s in scores
                 ]
-            }).dropna()
-            if not process_df.empty:
-                st.subheader(process_name)
-                fig = px.line(
-                    process_df,
-                    x='Date',
-                    y='Score',
-                    labels={'Score': 'Score (%)'}
-                )
-                st.plotly_chart(fig, use_container_width=True)
+                }).dropna()
+                if not process_df.empty:
+                    st.subheader(process_name)
+                    fig = px.line(process_df,  x='Date',  y='Score',  labels={'Score': 'Score (%)'})
+                    st.plotly_chart(fig, use_container_width=True)
 
 def display_data_completeness(data_completeness):
     st.header("Data Completeness")
