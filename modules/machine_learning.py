@@ -196,41 +196,28 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
         'max_depth': max_depth,
     }
 
-    # Create a list to store evaluation results
+    # Manually perform training rounds
+    model = None  # Initialize model
+    progress_step = 0
     evals_result = {}
 
-    # Define custom callback class
-    class ProgressCallback(TrainingCallback):
-        def __init__(self, total_rounds, progress_bar, status_text):
-            self.total_rounds = total_rounds
-            self.progress_bar = progress_bar
-            self.status_text = status_text
-            self.iteration = 0
-            self.step = 0
-
-        def after_iteration(self, model, epoch, evals_log):
-            self.iteration += 1
-            progress = self.iteration / self.total_rounds
-            if self.step < total_steps - 1:
-                self.status_text.text(progress_steps[self.step])
-            self.progress_bar.progress(progress)
-            if progress >= (self.step + 1) / (total_steps - 1):
-                self.step += 1
-            return False  # Continue training
-
-    # Create an instance of the callback
-    progress_callback = ProgressCallback(n_estimators, progress_bar, status_text)
-
-    # Train the model with callbacks
-    model = xgb.train(
-        params,
-        dtrain,
-        num_boost_round=n_estimators,
-        evals=[(dtest, 'eval')],
-        evals_result=evals_result,
-        verbose_eval=False,
-        callbacks=[progress_callback]
-    )
+    for i in range(n_estimators):
+        # Perform one boosting round
+        model = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=1,
+            xgb_model=model,
+            evals=[(dtest, 'eval')],
+            evals_result=evals_result,
+            verbose_eval=False
+        )
+        # Update progress bar and status text
+        progress = (i + 1) / n_estimators
+        progress_bar.progress(progress)
+        if progress >= (progress_step + 1) / (total_steps - 1) and progress_step < total_steps - 1:
+            status_text.text(progress_steps[progress_step])
+            progress_step += 1
 
     # Final progress update
     progress_bar.progress(1.0)
