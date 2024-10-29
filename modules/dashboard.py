@@ -6,7 +6,7 @@ from modules import data_preprocessing
 from modules import configuration_handler
 from modules import scoring
 from modules import visualization
-from modules import utils
+from utils import utils
 
 def run_dashboard():
     st.set_page_config(page_title="Wastewater Treatment Plant Dashboard", layout="wide")
