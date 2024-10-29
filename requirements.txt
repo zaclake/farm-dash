@@ -6,3 +6,5 @@ plotly
 streamlit-echarts
 python-dateutil
 openpyxl
+xgboost
+scikit-learn

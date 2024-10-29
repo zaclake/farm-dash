@@ -6,6 +6,7 @@ from modules import data_preprocessing
 from modules import configuration_handler
 from modules import scoring
 from modules import visualization
+from modules import machine_learning  # New module
 
 def run_dashboard():
     st.set_page_config(page_title="Wastewater Treatment Plant Dashboard", layout="wide")
@@ -52,15 +53,26 @@ def run_dashboard():
     # Calculate scores over time
     scores_over_time = scoring.calculate_scores_over_time(ml_data, configuration)
 
-    # Visualize results
-    visualization.run_visualization(
-        plant_scores,
-        scores_over_time,
-        unit_process_scores,
-        formatted_unit_process_names,
-        data_completeness,
-        ml_data
-    )
+    # Create Tabs
+    tabs = st.tabs(["Dashboard", "Data Query", "Machine Learning"])  # Added new tab
+
+    with tabs[0]:
+        # Visualize results
+        visualization.display_dashboard(
+            plant_scores,
+            scores_over_time,
+            unit_process_scores,
+            formatted_unit_process_names,
+            data_completeness
+        )
+
+    with tabs[1]:
+        visualization.display_data_query(ml_data)
+        visualization.display_recent_complete_day_summary(ml_data)
+
+    with tabs[2]:
+        # Machine Learning Tab
+        machine_learning.run_machine_learning_tab(ml_data, configuration)
 
 if __name__ == "__main__":
     run_dashboard()
