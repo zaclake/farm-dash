@@ -4,7 +4,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-from xgboost.callback import TrainingCallback
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 import plotly.express as px
@@ -27,6 +26,7 @@ def run_machine_learning_tab(ml_data, configuration):
         st.session_state['n_estimators'] = 100
 
     # Step 1: Target Metric Selection
+    # Allow any feature to be selected as the target
     target_options = [col for col in ml_data.columns if col != 'date']
     target_display_names = [col.replace('_', ' ').title() for col in target_options]
     target_name_mapping = dict(zip(target_display_names, target_options))
@@ -48,20 +48,33 @@ def run_machine_learning_tab(ml_data, configuration):
 
         # Display Feature Importances
         st.subheader("Feature Importances")
+        # Apply threshold to feature importances
         importance_df = pd.DataFrame({
             'Feature': [f.replace('_', ' ').title() for f in feature_importances.index],
             'Importance': feature_importances.values
-        }).sort_values(by='Importance', ascending=False)
+        })
+        # Dynamic cutoff: remove features with importance less than 5% of the max importance
+        max_importance = importance_df['Importance'].max()
+        importance_df = importance_df[importance_df['Importance'] >= 0.05 * max_importance]
+        # Sort and plot
+        importance_df = importance_df.sort_values(by='Importance', ascending=False)
         fig = px.bar(importance_df, x='Importance', y='Feature', orientation='h')
         st.plotly_chart(fig, use_container_width=True)
 
         # Step 3: Feature Selection
         st.subheader("Select Features for the Model")
-        feature_display_names = [f.replace('_', ' ').title() for f in feature_importances.index]
-        feature_name_mapping = dict(zip(feature_display_names, feature_importances.index))
+        # Filter features based on 'Adjustability' column in configuration
+        variable_features = get_variable_features(configuration)
+        # Exclude the selected target from features
+        available_features = [f for f in variable_features if f != st.session_state['selected_target']]
+        if not available_features:
+            st.warning("No variable features available for modeling.")
+            return
+        feature_display_names = [f.replace('_', ' ').title() for f in available_features]
+        feature_name_mapping = dict(zip(feature_display_names, available_features))
         default_features = feature_display_names[:5] if not st.session_state['selected_features'] else [f.replace('_', ' ').title() for f in st.session_state['selected_features']]
         selected_feature_display = st.multiselect(
-            "Select Features to Use in the Model (sorted by importance)",
+            "Select Features to Use in the Model (only variable features)",
             feature_display_names,
             default=default_features
         )
@@ -116,6 +129,11 @@ def run_machine_learning_tab(ml_data, configuration):
 
     else:
         st.info("Please select a target metric and click 'Calculate Feature Importances'.")
+
+def get_variable_features(configuration):
+    # Get features marked as 'Variable' in the 'Adjustability' column
+    variable_features = configuration[configuration['Adjustability'].str.lower() == 'variable']['feature_name'].tolist()
+    return variable_features
 
 def calculate_feature_importance(ml_data, selected_target):
     @st.cache_data
@@ -258,7 +276,11 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
     importance_df = pd.DataFrame({
         'Feature': [f.replace('_', ' ').title() for f in selected_features],
         'Importance': [importance.get(f, 0) for f in selected_features]
-    }).sort_values(by='Importance', ascending=False)
+    })
+    # Apply dynamic cutoff
+    max_importance = importance_df['Importance'].max()
+    importance_df = importance_df[importance_df['Importance'] >= 0.05 * max_importance]
+    importance_df = importance_df.sort_values(by='Importance', ascending=False)
     fig = px.bar(importance_df, x='Importance', y='Feature', orientation='h')
     st.plotly_chart(fig, use_container_width=True)
 
@@ -331,14 +353,16 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
 
     iteration = [0]  # Mutable object to keep track of iterations
 
-    max_iterations = 100
-
     # Get bounds and initial guess
     bounds = bounds_factory(ml_data, configuration, selected_features)
     initial_guess = initial_guess_factory(ml_data, selected_features)
 
     # Define objective function
     objective_function = objective_function_factory(model, selected_features, desired_target_value)
+
+    # Optimization options
+    max_iterations = 100
+    options = {'maxiter': max_iterations, 'disp': False}
 
     # Define callback for optimizer progress
     def optimizer_progress(xk):
@@ -348,7 +372,6 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
         if step < total_steps:
             status_text.text(progress_steps[step])
         progress_bar.progress(min(progress, 1.0))
-        # time.sleep(0.1)  # Optionally simulate computation time
 
     result = minimize(
         objective_function,
@@ -356,7 +379,7 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
         bounds=bounds,
         method='L-BFGS-B',
         callback=optimizer_progress,
-        options={'maxiter': max_iterations}
+        options=options
     )
 
     # Final progress update
