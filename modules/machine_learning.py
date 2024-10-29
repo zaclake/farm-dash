@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-from xgboost.callback import TrainingCallback  # Import TrainingCallback
+from xgboost.callback import TrainingCallback
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 import plotly.express as px
@@ -14,12 +14,6 @@ from scipy.optimize import minimize
 def run_machine_learning_tab(ml_data, configuration):
     st.header("Machine Learning Predictions and Optimization")
 
-    # Instructions or description of the tab
-    st.write("""
-    Use this tab to generate predictions and optimizations using machine learning models.
-    Select your target metric and features, adjust advanced settings, and visualize the results.
-    """)
-
     # Step 1: Target Metric Selection
     target_options = [col for col in ml_data.columns if col != 'date']
     target_display_names = [col.replace('_', ' ').title() for col in target_options]
@@ -27,18 +21,37 @@ def run_machine_learning_tab(ml_data, configuration):
     selected_target_display = st.selectbox("Select Target Metric to Predict or Optimize", target_display_names)
     selected_target = target_name_mapping[selected_target_display]
 
-    # Step 2: Feature Selection
-    feature_options = [col for col in ml_data.columns if col != 'date' and col != selected_target]
-    feature_display_names = [col.replace('_', ' ').title() for col in feature_options]
-    feature_name_mapping = dict(zip(feature_display_names, feature_options))
-    selected_feature_display = st.multiselect("Select Features to Use in the Model", feature_display_names)
+    # Step 2: Initial Feature Importance Calculation
+    st.subheader("Calculating Feature Importances...")
+    with st.spinner('Calculating feature importances...'):
+        feature_importances = calculate_feature_importance(ml_data, selected_target)
+    st.success("Feature importance calculation complete.")
+
+    # Display Feature Importances
+    st.subheader("Feature Importances")
+    importance_df = pd.DataFrame({
+        'Feature': [f.replace('_', ' ').title() for f in feature_importances.index],
+        'Importance': feature_importances.values
+    }).sort_values(by='Importance', ascending=False)
+    fig = px.bar(importance_df, x='Importance', y='Feature', orientation='h')
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Step 3: Feature Selection
+    st.subheader("Select Features for the Model")
+    feature_display_names = [f.replace('_', ' ').title() for f in feature_importances.index]
+    feature_name_mapping = dict(zip(feature_display_names, feature_importances.index))
+    selected_feature_display = st.multiselect(
+        "Select Features to Use in the Model (sorted by importance)",
+        feature_display_names,
+        default=feature_display_names[:5]
+    )
     selected_features = [feature_name_mapping[fdn] for fdn in selected_feature_display]
 
     if not selected_features:
         st.warning("Please select at least one feature.")
         return
 
-    # Step 3: Advanced Settings
+    # Step 4: Advanced Settings
     with st.expander("Advanced Settings"):
         st.write("Adjust hyperparameters for the XGBoost model.")
         learning_rate = st.slider("Learning Rate", min_value=0.01, max_value=0.3, value=0.1, step=0.01)
@@ -59,6 +72,43 @@ def run_machine_learning_tab(ml_data, configuration):
         # Add a button to trigger optimization
         if st.button("Run Optimization"):
             run_optimization(ml_data, configuration, selected_features, selected_target, learning_rate, max_depth, n_estimators, desired_target_value)
+
+def calculate_feature_importance(ml_data, selected_target):
+    @st.cache_data
+    def compute_importance(ml_data, selected_target):
+        # Prepare data
+        X = ml_data.drop(columns=['date', selected_target])
+        y = ml_data[selected_target]
+
+        # Handle missing values
+        X = X.fillna(method='ffill').fillna(method='bfill')
+        y = y.fillna(method='ffill').fillna(method='bfill')
+
+        # Convert data to DMatrix format
+        dtrain = xgb.DMatrix(X, label=y)
+
+        # Define parameters for XGBoost
+        params = {
+            'objective': 'reg:squarederror',
+            'learning_rate': 0.1,
+            'max_depth': 6,
+        }
+
+        # Train the model
+        model = xgb.train(
+            params,
+            dtrain,
+            num_boost_round=100,
+            verbose_eval=False
+        )
+
+        # Get feature importances
+        importance = model.get_score(importance_type='gain')
+        importance_series = pd.Series(importance).sort_values(ascending=False)
+        return importance_series
+
+    importance_series = compute_importance(ml_data, selected_target)
+    return importance_series
 
 def run_model(ml_data, selected_features, selected_target, learning_rate, max_depth, n_estimators):
     st.subheader("Model Training and Prediction")
@@ -82,6 +132,19 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
     progress_bar = st.progress(0)
     status_text = st.empty()
 
+    # Wastewater-themed progress steps
+    progress_steps = [
+        "Collecting samples from influent...",
+        "Cleaning the bar screens...",
+        "Skimming sludge blankets...",
+        "Topping off tanks...",
+        "Optimizing aeration rates...",
+        "Balancing flow between tanks...",
+        "Discharging treated water...",
+        "Clean predictions discharged downstream! 🎉"
+    ]
+    total_steps = len(progress_steps)
+
     # Define parameters for XGBoost
     params = {
         'objective': 'reg:squarederror',
@@ -98,11 +161,17 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
             self.total_rounds = total_rounds
             self.progress_bar = progress_bar
             self.status_text = status_text
+            self.iteration = 0
+            self.step = 0
 
         def after_iteration(self, model, epoch, evals_log):
-            progress = (epoch + 1) / self.total_rounds
+            self.iteration += 1
+            progress = self.iteration / self.total_rounds
+            if self.step < total_steps - 1:
+                self.status_text.text(progress_steps[self.step])
             self.progress_bar.progress(progress)
-            self.status_text.text(f"Training Iteration: {epoch + 1}/{self.total_rounds}")
+            if progress >= (self.step + 1) / (total_steps - 1):
+                self.step += 1
             return False  # Continue training
 
     # Create an instance of the callback
@@ -119,6 +188,10 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
         callbacks=[progress_callback]
     )
 
+    # Final progress update
+    progress_bar.progress(1.0)
+    status_text.text(progress_steps[-1])
+    time.sleep(1)
     # Clear progress bar
     progress_bar.empty()
     status_text.empty()
@@ -142,14 +215,14 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
     st.subheader("Model Performance")
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("RMSE", f"{rmse:.2f}")
+        st.metric("RMSE", f"{rmse:.2f}", help="Root Mean Square Error: Lower values indicate better fit.")
     with col2:
-        st.metric("R² Score", f"{r2:.2f}")
+        st.metric("R² Score", f"{r2:.2f}", help="R-squared: Proportion of variance explained by the model.")
     with col3:
         st.metric("Model Confidence", trust_indicator)
 
     # Feature Importances
-    st.subheader("Feature Importances")
+    st.subheader("Feature Importances in the Model")
     importance = model.get_score(importance_type='gain')
     importance_df = pd.DataFrame({
         'Feature': [f.replace('_', ' ').title() for f in selected_features],
@@ -207,8 +280,29 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
         verbose_eval=False
     )
 
-    # Optimization logic
-    # Define the objective function for optimization
+    # Wastewater-themed progress steps for optimizer
+    progress_steps = [
+        "Collecting samples from influent...",
+        "Balancing chemical dosages...",
+        "Tuning aerators and blowers...",
+        "Checking clarifiers for sludge blankets...",
+        "Adjusting pump speeds to balance flow...",
+        "Monitoring effluent quality...",
+        "Discharging treated water downstream...",
+        "All systems go! Optimized parameters ready for use! 🎉"
+    ]
+    total_steps = len(progress_steps)
+
+    # Run optimization
+    st.info("Running optimization...")
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    iteration = [0]  # Mutable object to keep track of iterations
+
+    # Maximum number of iterations
+    max_iterations = 100
+
     def objective_function(feature_values):
         # Convert feature_values to DMatrix
         feature_dict = {feature: [value] for feature, value in zip(selected_features, feature_values)}
@@ -238,33 +332,28 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
     # Initial guess: mean of the feature values
     initial_guess = [ml_data[feature].mean() for feature in selected_features]
 
-    # Maximum number of iterations
-    max_iterations = 100
-
-    # Run optimization
-    st.info("Running optimization...")
-
-    # Show progress bar during optimization
-    progress_bar = st.progress(0)
-    status_text = st.empty()
-
-    iteration = [0]  # Mutable object to keep track of iterations
-
-    def callback(xk):
+    # Define callback for optimizer progress
+    def optimizer_progress(xk):
         iteration[0] += 1
-        progress = min(iteration[0] / max_iterations, 1.0)
-        status_text.text(f"Optimization Iteration: {iteration[0]}")
-        progress_bar.progress(progress)
+        progress = iteration[0] / max_iterations
+        if iteration[0] < total_steps:
+            status_text.text(progress_steps[iteration[0] % total_steps])
+        progress_bar.progress(min(progress, 1.0))
+        time.sleep(0.1)  # Simulate computation time
 
     result = minimize(
         objective_function,
         x0=initial_guess,
         bounds=bounds,
         method='L-BFGS-B',
-        callback=callback,
+        callback=optimizer_progress,
         options={'maxiter': max_iterations}
     )
 
+    # Final progress update
+    progress_bar.progress(1.0)
+    status_text.text(progress_steps[-1])
+    time.sleep(1)
     # Clear progress bar
     progress_bar.empty()
     status_text.empty()
