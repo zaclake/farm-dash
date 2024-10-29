@@ -4,6 +4,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import xgboost as xgb
+from xgboost.callback import TrainingCallback  # Import TrainingCallback
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 import plotly.express as px
@@ -91,11 +92,21 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
     # Create a list to store evaluation results
     evals_result = {}
 
-    # Define custom callback for progress
-    def progress_callback(env):
-        progress = env.iteration / n_estimators
-        progress_bar.progress(progress)
-        status_text.text(f"Training Iteration: {env.iteration}/{n_estimators}")
+    # Define custom callback class
+    class ProgressCallback(TrainingCallback):
+        def __init__(self, total_rounds, progress_bar, status_text):
+            self.total_rounds = total_rounds
+            self.progress_bar = progress_bar
+            self.status_text = status_text
+
+        def after_iteration(self, model, epoch, evals_log):
+            progress = (epoch + 1) / self.total_rounds
+            self.progress_bar.progress(progress)
+            self.status_text.text(f"Training Iteration: {epoch + 1}/{self.total_rounds}")
+            return False  # Continue training
+
+    # Create an instance of the callback
+    progress_callback = ProgressCallback(n_estimators, progress_bar, status_text)
 
     # Train the model with callbacks
     model = xgb.train(
