@@ -1,0 +1,8 @@
+dropbox
+streamlit
+pandas
+numpy
+plotly
+streamlit-echarts
+python-dateutil
+openpyxl
