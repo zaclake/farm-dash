@@ -9,7 +9,6 @@ from sklearn.metrics import mean_squared_error, r2_score
 import plotly.express as px
 import time
 from scipy.optimize import minimize
-from xgboost.callback import TrainingCallback
 
 def run_machine_learning_tab(ml_data, configuration):
     st.header("Machine Learning Predictions and Optimization")
@@ -43,7 +42,7 @@ def run_machine_learning_tab(ml_data, configuration):
         st.write("Adjust hyperparameters for the XGBoost model.")
         learning_rate = st.slider("Learning Rate", min_value=0.01, max_value=0.3, value=0.1, step=0.01)
         max_depth = st.slider("Max Depth", min_value=1, max_value=15, value=6, step=1)
-        n_estimators = st.slider("Number of Estimators", min_value=50, max_value=500, value=100, step=10)
+        n_estimators = st.slider("Number of Estimators (Boosting Rounds)", min_value=50, max_value=500, value=100, step=10)
 
     # Add a button to trigger model training and prediction
     if st.button("Run Model"):
@@ -78,38 +77,31 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    # Define custom callback class
-    class ProgressBarCallback(TrainingCallback):
-        def __init__(self, total, progress_bar, status_text):
-            self._total = total
-            self._progress_bar = progress_bar
-            self._status_text = status_text
-
-        def after_iteration(self, model, epoch, evals_log):
-            progress = (epoch + 1) / self._total
-            self._progress_bar.progress(progress)
-            self._status_text.text(f"Training Iteration: {epoch + 1}/{self._total}")
-            return False  # Continue training
-
-    # Train XGBoost model
+    # Custom training loop
+    eval_set = [(X_test, y_test)]
+    eval_metric = ['rmse']
     model = xgb.XGBRegressor(
         learning_rate=learning_rate,
         max_depth=max_depth,
-        n_estimators=n_estimators,
+        n_estimators=1,  # We will increment this in the loop
         objective='reg:squarederror',
-        verbosity=0
+        verbosity=0,
+        warm_start=True  # Allows incremental training
     )
 
-    # Define the custom callback
-    callbacks = [ProgressBarCallback(n_estimators, progress_bar, status_text)]
-
-    model.fit(
-        X_train,
-        y_train,
-        eval_set=[(X_test, y_test)],
-        callbacks=callbacks,
-        verbose=False
-    )
+    for i in range(n_estimators):
+        model.n_estimators = i + 1  # Increment the number of estimators
+        model.fit(
+            X_train,
+            y_train,
+            eval_set=eval_set,
+            eval_metric=eval_metric,
+            xgb_model=model if i > 0 else None,
+            verbose=False
+        )
+        progress = (i + 1) / n_estimators
+        progress_bar.progress(progress)
+        status_text.text(f"Training Iteration: {i + 1}/{n_estimators}")
 
     # Clear progress bar
     progress_bar.empty()
@@ -230,7 +222,7 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    # Callback function to update progress
+    # Since we cannot use callback, we'll simulate progress updates
     iteration = [0]  # Mutable object to keep track of iterations
 
     def callback(xk):
