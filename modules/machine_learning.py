@@ -73,42 +73,47 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
     # Split data
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
+    # Convert data to DMatrix format
+    dtrain = xgb.DMatrix(X_train, label=y_train)
+    dtest = xgb.DMatrix(X_test, label=y_test)
+
     # Initialize progress bar
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    # Custom training loop
-    eval_set = [(X_test, y_test)]
-    eval_metric = ['rmse']
-    model = xgb.XGBRegressor(
-        learning_rate=learning_rate,
-        max_depth=max_depth,
-        n_estimators=1,  # We will increment this in the loop
-        objective='reg:squarederror',
-        verbosity=0,
-        warm_start=True  # Allows incremental training
-    )
+    # Define parameters for XGBoost
+    params = {
+        'objective': 'reg:squarederror',
+        'learning_rate': learning_rate,
+        'max_depth': max_depth,
+    }
 
-    for i in range(n_estimators):
-        model.n_estimators = i + 1  # Increment the number of estimators
-        model.fit(
-            X_train,
-            y_train,
-            eval_set=eval_set,
-            eval_metric=eval_metric,
-            xgb_model=model if i > 0 else None,
-            verbose=False
-        )
-        progress = (i + 1) / n_estimators
+    # Create a list to store evaluation results
+    evals_result = {}
+
+    # Define custom callback for progress
+    def progress_callback(env):
+        progress = env.iteration / n_estimators
         progress_bar.progress(progress)
-        status_text.text(f"Training Iteration: {i + 1}/{n_estimators}")
+        status_text.text(f"Training Iteration: {env.iteration}/{n_estimators}")
+
+    # Train the model with callbacks
+    model = xgb.train(
+        params,
+        dtrain,
+        num_boost_round=n_estimators,
+        evals=[(dtest, 'eval')],
+        evals_result=evals_result,
+        verbose_eval=False,
+        callbacks=[progress_callback]
+    )
 
     # Clear progress bar
     progress_bar.empty()
     status_text.empty()
 
     # Make predictions
-    y_pred = model.predict(X_test)
+    y_pred = model.predict(dtest)
 
     # Evaluate model
     rmse = np.sqrt(mean_squared_error(y_test, y_pred))
@@ -134,9 +139,10 @@ def run_model(ml_data, selected_features, selected_target, learning_rate, max_de
 
     # Feature Importances
     st.subheader("Feature Importances")
+    importance = model.get_score(importance_type='gain')
     importance_df = pd.DataFrame({
         'Feature': [f.replace('_', ' ').title() for f in selected_features],
-        'Importance': model.feature_importances_
+        'Importance': [importance.get(f, 0) for f in selected_features]
     }).sort_values(by='Importance', ascending=False)
     fig = px.bar(importance_df, x='Importance', y='Feature', orientation='h')
     st.plotly_chart(fig, use_container_width=True)
@@ -172,25 +178,34 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
     X = X.fillna(method='ffill').fillna(method='bfill')
     y = y.fillna(method='ffill').fillna(method='bfill')
 
+    # Convert data to DMatrix format
+    dtrain = xgb.DMatrix(X, label=y)
+
+    # Define parameters for XGBoost
+    params = {
+        'objective': 'reg:squarederror',
+        'learning_rate': learning_rate,
+        'max_depth': max_depth,
+    }
+
     # Train the model on all data
-    model = xgb.XGBRegressor(
-        learning_rate=learning_rate,
-        max_depth=max_depth,
-        n_estimators=n_estimators,
-        objective='reg:squarederror',
-        verbosity=0
+    model = xgb.train(
+        params,
+        dtrain,
+        num_boost_round=n_estimators,
+        verbose_eval=False
     )
-    model.fit(X, y)
 
     # Optimization logic
     # Define the objective function for optimization
     def objective_function(feature_values):
-        # Convert feature_values to DataFrame
+        # Convert feature_values to DMatrix
         feature_dict = {feature: [value] for feature, value in zip(selected_features, feature_values)}
         input_df = pd.DataFrame(feature_dict)
+        dinput = xgb.DMatrix(input_df)
 
         # Predict using the model
-        predicted = model.predict(input_df)[0]
+        predicted = model.predict(dinput)[0]
 
         # Objective is the squared difference between predicted and desired target value
         return (predicted - desired_target_value) ** 2
@@ -222,7 +237,6 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
     progress_bar = st.progress(0)
     status_text = st.empty()
 
-    # Since we cannot use callback, we'll simulate progress updates
     iteration = [0]  # Mutable object to keep track of iterations
 
     def callback(xk):
@@ -261,7 +275,10 @@ def run_optimization(ml_data, configuration, selected_features, selected_target,
     st.table(optimized_df)
 
     # Predicted value with optimized parameters
-    optimized_prediction = model.predict(pd.DataFrame([optimized_feature_values], columns=selected_features))[0]
+    feature_dict = {feature: [value] for feature, value in zip(selected_features, optimized_feature_values)}
+    input_df = pd.DataFrame(feature_dict)
+    dinput = xgb.DMatrix(input_df)
+    optimized_prediction = model.predict(dinput)[0]
     st.subheader("Optimized Prediction")
     st.write(f"Predicted {selected_target.replace('_', ' ').title()}: {optimized_prediction:.2f}")
 
