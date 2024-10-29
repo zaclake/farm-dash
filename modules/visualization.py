@@ -461,13 +461,14 @@ def display_data_query(ml_data):
             
             #Create a CSV download button for the queried data
             csv = smoothed_data.to_csv(index=False).encode('utf-8')
+
             st.download_button(
                 label="Download Queried Data as CSV",
                 data=csv,
-                file_name='queried_data.csv'
+                file_name='queried_data.csv',
                 mime='text/csv'
             )
-
+        
 def display_recent_complete_day_summary(ml_data):
     st.header("Recent Complete Day Summary")
     key_features = ['d2_ph', 'd3_ph', 'mlss', 'sbd', 'eff_flow']
