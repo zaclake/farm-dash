@@ -14,8 +14,7 @@ def run_visualization(
     unit_process_scores,
     formatted_unit_process_names,
     data_completeness,
-    ml_data,
-    configuration
+    ml_data
 ):
     tabs = st.tabs(["Dashboard", "Data Query"])
 
@@ -25,8 +24,7 @@ def run_visualization(
             scores_over_time,
             unit_process_scores,
             formatted_unit_process_names,
-            data_completeness,
-            ml_data
+            data_completeness
         )
 
     with tabs[1]:
@@ -38,8 +36,7 @@ def display_dashboard(
     scores_over_time,
     unit_process_scores,
     formatted_unit_process_names,
-    data_completeness,
-    ml_data
+    data_completeness
 ):
     """Display the dashboard with all visualizations."""
     st.header("Plant Performance Overview")
