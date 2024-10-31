@@ -74,5 +74,5 @@ def run_dashboard():
         # Machine Learning Tab
         machine_learning.run_machine_learning_tab(ml_data, configuration)
 
-if __name__ == "__main__":
+if __name__ == "__streamlit_app__":
     run_dashboard()
